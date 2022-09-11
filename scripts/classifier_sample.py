@@ -10,7 +10,8 @@ import numpy as np
 import torch as th
 import torch.distributed as dist
 import torch.nn.functional as F
-
+import sys
+sys.path.append('.')
 from guided_diffusion import dist_util, logger
 from guided_diffusion.script_util import (
     NUM_CLASSES,
@@ -25,9 +26,11 @@ from guided_diffusion.script_util import (
 
 def main():
     args = create_argparser().parse_args()
+    os.environ["CUDA_VISIBLE_DEVICES"] = args.device_id
 
+    print(args)
     dist_util.setup_dist()
-    logger.configure()
+    logger.configure(dir=os.path.join(args.save_root,args.exp_name))
 
     logger.log("creating model and diffusion...")
     model, diffusion = create_model_and_diffusion(
@@ -69,9 +72,16 @@ def main():
     all_labels = []
     while len(all_images) * args.batch_size < args.num_samples:
         model_kwargs = {}
-        classes = th.randint(
-            low=0, high=NUM_CLASSES, size=(args.batch_size,), device=dist_util.dev()
-        )
+        if len(args.classes) != 0:
+            classes = args.classes.split('/')
+            classes = list(map(int,classes))
+            print('input classes:', classes)
+            # assert len(classes) == args.batch_size, "the batch size should match the number of classes"
+            classes = th.tensor(classes, device=dist_util.dev())
+        else:
+            classes = th.randint(
+                low=0, high=NUM_CLASSES, size=(args.batch_size,), device=dist_util.dev()
+            )
         model_kwargs["y"] = classes
         sample_fn = (
             diffusion.p_sample_loop if not args.use_ddim else diffusion.ddim_sample_loop
@@ -119,6 +129,10 @@ def create_argparser():
         model_path="",
         classifier_path="",
         classifier_scale=1.0,
+        exp_name="",
+        classes="",
+        save_root="",
+        device_id="1"
     )
     defaults.update(model_and_diffusion_defaults())
     defaults.update(classifier_defaults())
